@@ -1,0 +1,21 @@
+# Credentials — never commit these
+*.secret
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# HA dev
+.storage/
+home-assistant.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+PLAN.md
+TODO.md
+*.csv
+/XYZ

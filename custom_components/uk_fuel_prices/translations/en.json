@@ -1,0 +1,91 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "UK Fuel Prices — API Credentials",
+        "description": "Enter your Client ID and Client Secret from [developer.fuel-finder.service.gov.uk](https://www.developer.fuel-finder.service.gov.uk/).",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client Secret"
+        }
+      }
+    },
+    "error": {
+      "invalid_credentials": "Invalid Client ID or Client Secret.",
+      "cannot_connect": "Unable to connect to the UK Fuel Prices API. Check your network and try again.",
+      "rate_limited": "Too many requests to the UK Fuel Prices API. Please wait a few minutes and try again."
+    },
+    "abort": {
+      "already_configured": "UK Fuel Prices is already configured."
+    }
+  },
+  "options": {
+    "error": {
+      "no_stations_found": "No stations found matching that name. Try a shorter or different search term."
+    },
+    "abort": {
+      "device_not_found": "This device is not associated with a configured station."
+    },
+    "step": {
+      "init": {
+        "title": "Manage Stations",
+        "description": "Configured stations:\n{stations}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "search_station": {
+        "title": "Search for a Station",
+        "description": "Search by station name, brand (e.g. Tesco, BP, Shell), postcode, or town. All stations will be searched automatically. This can take a few seconds.",
+        "data": {
+          "search_term": "Search"
+        }
+      },
+      "search_results": {
+        "title": "Select a Station",
+        "description": "{count} station(s) found. Results show name, brand, postcode and town where available.",
+        "data": {
+          "station": "Station"
+        }
+      },
+      "edit_station": {
+        "title": "Edit Station",
+        "description": "Update the fuel types tracked for **{station}**. To remove this station, use the delete option in the device 3-dot menu.",
+        "data": {
+          "fuel_types": "Fuel Types"
+        }
+      },
+      "thresholds": {
+        "title": "Price Level Thresholds",
+        "description": "Set the price thresholds (in pence) used to calculate the `price_level` attribute on each sensor.\n\n- **Low** (green): below the low threshold\n- **Medium** (amber): between low and high\n- **High** (red): above the high threshold",
+        "data": {
+          "price_threshold_low": "Low / Medium threshold (p)",
+          "price_threshold_high": "Medium / High threshold (p)"
+        }
+      },
+      "settings": {
+        "title": "Update Interval",
+        "description": "How often to poll the Fuel Finder API for new prices. More frequent updates consume more API quota.",
+        "data": {
+          "update_interval": "Update interval (minutes)"
+        }
+      },
+      "add_station": {
+        "title": "Add Station Manually",
+        "description": "Enter the station details from the [UK Fuel Prices developer portal](https://www.developer.fuel-finder.service.gov.uk/). You can find the batch number and node ID by browsing the API documentation.",
+        "data": {
+          "name": "Station Name",
+          "batch": "Batch Number",
+          "node_id": "Node ID"
+        }
+      },
+      "add_fuel_types": {
+        "title": "Select Fuel Types",
+        "description": "Choose which fuel types to track for **{station}**.",
+        "data": {
+          "fuel_types": "Fuel Types"
+        }
+      }
+    }
+  }
+}

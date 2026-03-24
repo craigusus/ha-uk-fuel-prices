@@ -1,0 +1,11 @@
+{
+  "domain": "uk_fuel_prices",
+  "name": "UK Fuel Prices",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/craigusus/ha-uk-fuel-prices",
+  "issue_tracker": "https://github.com/craigusus/ha-uk-fuel-prices/issues",
+  "requirements": [],
+  "iot_class": "cloud_polling",
+  "codeowners": []
+}

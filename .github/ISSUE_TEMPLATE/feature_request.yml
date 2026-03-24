@@ -1,0 +1,17 @@
+name: Request a feature for UK Fuel Prices
+labels: ["feature"]
+title: "[Feature Request]: "
+description: Request a feature for UK Fuel Prices.
+body:
+  - type: textarea
+    validations:
+      required: true
+    attributes:
+      label: The feature
+      description: >-
+        Describe the feature you'd like added.
+  - type: textarea
+    attributes:
+      label: Additional information
+      description: >
+        If you have any additional information for us, use the field below.
