@@ -1,7 +1,7 @@
 {
   "domain": "uk_fuel_prices",
   "name": "UK Fuel Prices",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "config_flow": true,
   "documentation": "https://github.com/craigusus/ha-uk-fuel-prices",
   "issue_tracker": "https://github.com/craigusus/ha-uk-fuel-prices/issues",

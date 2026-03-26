@@ -14,6 +14,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     PRICES_URL,
+    SEARCH_MAX_BATCH,
     STATION_METADATA_CACHE_SECONDS,
     STATIONS_URL,
     TOKEN_URL,
@@ -47,6 +48,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         self._token_expires_at: float = 0
         self._station_metadata: dict[str, dict] = {}
         self._station_metadata_last_fetched: float = 0
+        self._batch_overrides: dict[str, int] = {}  # node_id -> corrected batch number
 
     async def _get_token(self) -> str:
         """Return a valid access token, fetching a new one if necessary."""
@@ -91,10 +93,28 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Batch {batch} request failed with status {resp.status}")
             return await resp.json()
 
+    async def _find_station_in_any_batch(
+        self, token: str, node_id: str, batch_data: dict[int, list]
+    ) -> int | None:
+        """Search all batches for a station by node_id. Fetches and caches batches not yet loaded."""
+        for batch in range(1, SEARCH_MAX_BATCH + 1):
+            if batch in batch_data:
+                if any(s["node_id"] == node_id for s in batch_data[batch]):
+                    return batch
+            else:
+                try:
+                    data = await self._fetch_batch(token, batch)
+                except Exception:
+                    continue
+                batch_data[batch] = data
+                if any(s["node_id"] == node_id for s in data):
+                    return batch
+        return None
+
     async def _fetch_station_metadata(self, token: str) -> None:
         """Fetch rich station data from the stations API and cache it (refreshed daily)."""
         session = async_get_clientsession(self.hass)
-        batches = list({s["batch"] for s in self._stations})
+        batches = list({self._batch_overrides.get(s["node_id"], s["batch"]) for s in self._stations})
         metadata: dict[str, dict] = {}
 
         for batch in batches:
@@ -180,8 +200,8 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.warning("Station metadata fetch failed, rich attributes unavailable: %s", err)
 
-        # Deduplicate batches and fetch all in parallel
-        batches = list({s["batch"] for s in self._stations})
+        # Deduplicate batches (applying any cached overrides) and fetch all in parallel
+        batches = list({self._batch_overrides.get(s["node_id"], s["batch"]) for s in self._stations})
         results = await asyncio.gather(
             *[self._fetch_batch(token, b) for b in batches],
             return_exceptions=True,
@@ -196,18 +216,32 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         # Extract prices for each configured station
         data: dict[str, Any] = {}
         for station in self._stations:
-            station_list = batch_data.get(station["batch"], [])
+            effective_batch = self._batch_overrides.get(station["node_id"], station["batch"])
+            station_list = batch_data.get(effective_batch, [])
             station_data = next(
                 (s for s in station_list if s["node_id"] == station["node_id"]), None
             )
             if not station_data:
-                _LOGGER.warning(
-                    "Station '%s' (node_id: %s) not found in batch %s",
-                    station["name"],
-                    station["node_id"],
-                    station["batch"],
-                )
-                continue
+                found_batch = await self._find_station_in_any_batch(token, station["node_id"], batch_data)
+                if found_batch is not None:
+                    station_data = next(s for s in batch_data[found_batch] if s["node_id"] == station["node_id"])
+                    self._batch_overrides[station["node_id"]] = found_batch
+                    _LOGGER.warning(
+                        "Station '%s' (node_id: %s) not found in batch %s but found in batch %s — "
+                        "batch override cached for this session. Remove and re-add the station to make this permanent.",
+                        station["name"],
+                        station["node_id"],
+                        effective_batch,
+                        found_batch,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Station '%s' (node_id: %s) not found in any batch — "
+                        "it may have been closed or removed from the API",
+                        station["name"],
+                        station["node_id"],
+                    )
+                    continue
 
             prices: dict[str, Any] = {}
             for fp in station_data["fuel_prices"]:
