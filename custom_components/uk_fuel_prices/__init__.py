@@ -21,6 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client_secret=entry.data[CONF_CLIENT_SECRET],
         stations=entry.options.get(CONF_STATIONS, []),
         update_interval=entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+        config_entry=entry,
     )
 
     await coordinator.async_config_entry_first_refresh()

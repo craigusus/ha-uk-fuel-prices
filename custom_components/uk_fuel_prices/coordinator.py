@@ -6,11 +6,13 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_STATIONS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     PRICES_URL,
@@ -34,6 +36,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         client_secret: str,
         stations: list[dict],
         update_interval: int = DEFAULT_UPDATE_INTERVAL,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -44,11 +47,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         self._client_id = client_id
         self._client_secret = client_secret
         self._stations = stations
+        self._config_entry = config_entry
         self._token: str | None = None
         self._token_expires_at: float = 0
         self._station_metadata: dict[str, dict] = {}
         self._station_metadata_last_fetched: float = 0
-        self._batch_overrides: dict[str, int] = {}  # node_id -> corrected batch number
 
     async def _get_token(self) -> str:
         """Return a valid access token, fetching a new one if necessary."""
@@ -114,7 +117,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
     async def _fetch_station_metadata(self, token: str) -> None:
         """Fetch rich station data from the stations API and cache it (refreshed daily)."""
         session = async_get_clientsession(self.hass)
-        batches = list({self._batch_overrides.get(s["node_id"], s["batch"]) for s in self._stations})
+        batches = list({s["batch"] for s in self._stations})
         metadata: dict[str, dict] = {}
 
         for batch in batches:
@@ -200,8 +203,8 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.warning("Station metadata fetch failed, rich attributes unavailable: %s", err)
 
-        # Deduplicate batches (applying any cached overrides) and fetch all in parallel
-        batches = list({self._batch_overrides.get(s["node_id"], s["batch"]) for s in self._stations})
+        # Deduplicate batches and fetch all in parallel
+        batches = list({s["batch"] for s in self._stations})
         results = await asyncio.gather(
             *[self._fetch_batch(token, b) for b in batches],
             return_exceptions=True,
@@ -215,9 +218,9 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
 
         # Extract prices for each configured station
         data: dict[str, Any] = {}
+        batch_corrections: dict[str, int] = {}
         for station in self._stations:
-            effective_batch = self._batch_overrides.get(station["node_id"], station["batch"])
-            station_list = batch_data.get(effective_batch, [])
+            station_list = batch_data.get(station["batch"], [])
             station_data = next(
                 (s for s in station_list if s["node_id"] == station["node_id"]), None
             )
@@ -225,13 +228,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 found_batch = await self._find_station_in_any_batch(token, station["node_id"], batch_data)
                 if found_batch is not None:
                     station_data = next(s for s in batch_data[found_batch] if s["node_id"] == station["node_id"])
-                    self._batch_overrides[station["node_id"]] = found_batch
-                    _LOGGER.warning(
-                        "Station '%s' (node_id: %s) not found in batch %s but found in batch %s — "
-                        "batch override cached for this session. Remove and re-add the station to make this permanent.",
+                    batch_corrections[station["node_id"]] = found_batch
+                    _LOGGER.info(
+                        "Station '%s' moved from batch %s to batch %s — updating config automatically.",
                         station["name"],
-                        station["node_id"],
-                        effective_batch,
+                        station["batch"],
                         found_batch,
                     )
                 else:
@@ -273,5 +274,16 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 "opening_hours": csv_meta.get("opening_hours"),
                 "amenities": csv_meta.get("amenities"),
             }
+
+        if batch_corrections and self._config_entry is not None:
+            updated_stations = [
+                {**s, "batch": batch_corrections[s["node_id"]]} if s["node_id"] in batch_corrections else s
+                for s in self._stations
+            ]
+            self._stations = updated_stations
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                options={**self._config_entry.options, CONF_STATIONS: updated_stations},
+            )
 
         return data
