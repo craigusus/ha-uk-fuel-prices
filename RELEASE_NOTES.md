@@ -1,3 +1,11 @@
+## v1.0.3
+
+### Bug Fixes
+
+- **Permanent batch auto-correction** — when a station has moved to a different API batch, the correct batch is now automatically persisted to the integration config. No more repeated warnings on restart and no need to remove and re-add the station manually.
+
+---
+
 ## v1.0.2
 
 ### Bug Fixes
