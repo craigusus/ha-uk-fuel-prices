@@ -19,13 +19,15 @@ CONF_BATCH = "batch"
 CONF_NODE_ID = "node_id"
 CONF_FUEL_TYPES = "fuel_types"
 
-FUEL_TYPES = ["E5", "E10", "B7_STANDARD", "B7_PREMIUM"]
+FUEL_TYPES = ["E5", "E10", "B7_STANDARD", "B7_PREMIUM", "B10", "HVO"]
 
 FUEL_TYPE_LABELS = {
     "E5": "E5 Premium Unleaded",
     "E10": "E10 Unleaded",
     "B7_STANDARD": "Diesel",
     "B7_PREMIUM": "Premium Diesel",
+    "B10": "B10 Biodiesel",
+    "HVO": "HVO Renewable Diesel",
 }
 
 CONF_UPDATE_INTERVAL = "update_interval"

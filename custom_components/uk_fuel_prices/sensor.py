@@ -117,6 +117,7 @@ class FuelPriceSensor(CoordinatorEntity, SensorEntity):
 
         attrs = {
             "price_last_updated": fuel_data.get("updated"),
+            "price_change_effective": fuel_data.get("effective"),
             "fuel_type": self._fuel_type,
             "station_name": station_data.get("name"),
             "price_level": level,
@@ -143,10 +144,13 @@ class FuelPriceSensor(CoordinatorEntity, SensorEntity):
             except (TypeError, ValueError):
                 pass
 
-        for field in ("is_motorway_service_station", "is_supermarket_service_station", "temporary_closure"):
+        for field in ("is_motorway_service_station", "is_supermarket_service_station", "temporary_closure", "permanent_closure"):
             val = station_data.get(field)
             if val is not None:
                 attrs[field] = val
+
+        if station_data.get("permanent_closure_date"):
+            attrs["permanent_closure_date"] = station_data["permanent_closure_date"]
 
         opening_hours = station_data.get("opening_hours")
         if opening_hours:

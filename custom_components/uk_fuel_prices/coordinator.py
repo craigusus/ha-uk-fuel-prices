@@ -26,6 +26,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class _TransientApiError(Exception):
+    """Raised when the upstream API returns a 5xx error that may resolve on retry."""
+
+
 class FuelFinderCoordinator(DataUpdateCoordinator):
     """Fetches fuel prices from the UK Government Fuel Finder API."""
 
@@ -92,6 +96,8 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed("Unauthorised — token rejected by API")
             if resp.status == 429:
                 raise UpdateFailed("Rate limited by Fuel Finder API — will retry next interval")
+            if resp.status >= 500:
+                raise _TransientApiError(f"Batch {batch} request failed with status {resp.status}")
             if resp.status != 200:
                 raise UpdateFailed(f"Batch {batch} request failed with status {resp.status}")
             return await resp.json()
@@ -165,6 +171,8 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                     "is_motorway_service_station": s.get("is_motorway_service_station"),
                     "is_supermarket_service_station": s.get("is_supermarket_service_station"),
                     "temporary_closure": s.get("temporary_closure"),
+                    "permanent_closure": s.get("permanent_closure"),
+                    "permanent_closure_date": s.get("permanent_closure_date") or None,
                     "opening_hours": opening_hours or None,
                     "amenities": {
                         "adblue_pumps": "adblue_pumps" in amenities_list,
@@ -213,6 +221,13 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         batch_data: dict[int, list] = {}
         for batch, result in zip(batches, results):
             if isinstance(result, Exception):
+                if isinstance(result, _TransientApiError):
+                    _LOGGER.warning(
+                        "Transient API error fetching batch %s: %s — keeping last known data",
+                        batch,
+                        result,
+                    )
+                    return self.data or {}
                 raise UpdateFailed(f"Failed to fetch batch {batch}: {result}")
             batch_data[batch] = result
 
@@ -249,10 +264,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 prices[fp["fuel_type"]] = {
                     "price": fp["price"],
                     "updated": fp["price_last_updated"],
+                    "effective": fp.get("price_change_effective_timestamp"),
                 }
 
             api_location = station_data.get("location") or {}
-            csv_meta = self._station_metadata.get(station["node_id"], {})
+            station_meta = self._station_metadata.get(station["node_id"], {})
 
             data[station["node_id"]] = {
                 "name": station_data["trading_name"],
@@ -263,16 +279,18 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 "latitude": api_location.get("latitude") or station.get("latitude") or None,
                 "longitude": api_location.get("longitude") or station.get("longitude") or None,
                 # Enriched from stations API (refreshed daily)
-                "address_line_2": csv_meta.get("address_line_2"),
-                "city": csv_meta.get("city"),
-                "county": csv_meta.get("county"),
-                "country": csv_meta.get("country"),
-                "phone": csv_meta.get("phone"),
-                "is_motorway_service_station": csv_meta.get("is_motorway_service_station"),
-                "is_supermarket_service_station": csv_meta.get("is_supermarket_service_station"),
-                "temporary_closure": csv_meta.get("temporary_closure"),
-                "opening_hours": csv_meta.get("opening_hours"),
-                "amenities": csv_meta.get("amenities"),
+                "address_line_2": station_meta.get("address_line_2"),
+                "city": station_meta.get("city"),
+                "county": station_meta.get("county"),
+                "country": station_meta.get("country"),
+                "phone": station_meta.get("phone"),
+                "is_motorway_service_station": station_meta.get("is_motorway_service_station"),
+                "is_supermarket_service_station": station_meta.get("is_supermarket_service_station"),
+                "temporary_closure": station_meta.get("temporary_closure"),
+                "permanent_closure": station_meta.get("permanent_closure"),
+                "permanent_closure_date": station_meta.get("permanent_closure_date"),
+                "opening_hours": station_meta.get("opening_hours"),
+                "amenities": station_meta.get("amenities"),
             }
 
         if batch_corrections and self._config_entry is not None:
