@@ -1,3 +1,17 @@
+## v1.0.4
+
+### New Features
+
+- **B10 and HVO fuel types** — B10 Biodiesel and HVO Renewable Diesel are now available as trackable fuel types when adding or editing a station.
+- **Price effective timestamp** — sensor attributes now include `price_change_effective` alongside `price_last_updated`, showing when a price change became effective rather than just when it was submitted.
+- **Permanent closure details** — `permanent_closure` and `permanent_closure_date` are now exposed as sensor attributes where available.
+
+### Bug Fixes
+
+- **Entities no longer go unknown during API outages** — transient server errors (HTTP 5xx) from the Fuel Finder API now preserve the last known prices instead of wiping all sensor values until the next successful poll.
+
+---
+
 ## v1.0.3
 
 ### Bug Fixes
