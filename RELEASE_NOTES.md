@@ -1,3 +1,13 @@
+## v1.0.5
+
+### Improvements
+
+- **Global 429 rate-limit cooldown** — when any config entry receives a rate-limit response from the Fuel Finder API, all instances now pause together until the cooldown elapses. This prevents multiple config entries from compounding a rate-limit violation against each other. The `Retry-After` header is respected where provided.
+- **Incremental price refresh** — after the first successful update, subsequent polls only request stations with price changes since the last run using `effective-start-timestamp`. This significantly reduces API load on hourly updates.
+- **`price_is_stale` sensor attribute** — each fuel price sensor now exposes a `price_is_stale` boolean attribute. It is `true` when `price_last_updated` is older than 24 hours, `false` when fresh, and `null` when no timestamp is available. Use this in automations to alert on stations that haven't reported recently.
+
+---
+
 ## v1.0.4
 
 ### New Features
