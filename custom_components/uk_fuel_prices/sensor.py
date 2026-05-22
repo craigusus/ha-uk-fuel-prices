@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -115,12 +115,24 @@ class FuelPriceSensor(CoordinatorEntity, SensorEntity):
         else:
             level = None
 
+        last_updated_raw = fuel_data.get("updated")
+        price_is_stale: bool | None = None
+        if last_updated_raw:
+            try:
+                last_updated_dt = datetime.fromisoformat(last_updated_raw.replace("Z", "+00:00"))
+                if last_updated_dt.tzinfo is None:
+                    last_updated_dt = last_updated_dt.replace(tzinfo=timezone.utc)
+                price_is_stale = (datetime.now(timezone.utc) - last_updated_dt) > timedelta(hours=24)
+            except (ValueError, AttributeError):
+                pass
+
         attrs = {
-            "price_last_updated": fuel_data.get("updated"),
+            "price_last_updated": last_updated_raw,
             "price_change_effective": fuel_data.get("effective"),
             "fuel_type": self._fuel_type,
             "station_name": station_data.get("name"),
             "price_level": level,
+            "price_is_stale": price_is_stale,
         }
 
         for field in ("brand", "postcode", "address", "address_line_2", "city", "county", "country", "phone"):

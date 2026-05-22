@@ -25,6 +25,11 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Shared across all coordinator instances: when any entry receives a 429, all
+# instances pause until this timestamp passes, preventing cascading violations.
+_global_429_cooldown_until: float = 0.0
+_global_429_lock = asyncio.Lock()
+
 
 class _TransientApiError(Exception):
     """Raised when the upstream API returns a 5xx error that may resolve on retry."""
@@ -56,6 +61,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         self._token_expires_at: float = 0
         self._station_metadata: dict[str, dict] = {}
         self._station_metadata_last_fetched: float = 0
+        self._last_prices_fetched_at: str | None = None  # ISO date of last successful price fetch
 
     async def _get_token(self) -> str:
         """Return a valid access token, fetching a new one if necessary."""
@@ -85,16 +91,41 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Fetched new access token (expires in %ss)", token_data["expires_in"])
         return self._token
 
-    async def _fetch_batch(self, token: str, batch: int) -> list:
+    @staticmethod
+    async def _respect_global_429_cooldown() -> None:
+        """Wait if a previous 429 cooldown is still active."""
+        global _global_429_cooldown_until
+        remaining = _global_429_cooldown_until - asyncio.get_running_loop().time()
+        if remaining > 0:
+            _LOGGER.info("Fuel Finder global 429 cooldown active; waiting %.1fs", remaining)
+            await asyncio.sleep(remaining)
+
+    @staticmethod
+    async def _set_global_429_cooldown(seconds: float) -> None:
+        """Extend the global 429 cooldown so all instances back off."""
+        global _global_429_cooldown_until
+        async with _global_429_lock:
+            new_until = asyncio.get_running_loop().time() + seconds
+            if new_until > _global_429_cooldown_until:
+                _global_429_cooldown_until = new_until
+                _LOGGER.debug("Fuel Finder global 429 cooldown set for %.1fs", seconds)
+
+    async def _fetch_batch(self, token: str, batch: int, *, effective_start: str | None = None) -> list:
         """Fetch a single batch of fuel price data."""
+        await self._respect_global_429_cooldown()
         session = async_get_clientsession(self.hass)
+        url = f"{PRICES_URL}?batch-number={batch}"
+        if effective_start:
+            url = f"{url}&effective-start-timestamp={effective_start}"
         async with session.get(
-            f"{PRICES_URL}?batch-number={batch}",
+            url,
             headers={"Authorization": f"Bearer {token}"},
         ) as resp:
             if resp.status == 401:
                 raise UpdateFailed("Unauthorised — token rejected by API")
             if resp.status == 429:
+                retry_after = float(resp.headers.get("Retry-After", 30))
+                await self._set_global_429_cooldown(retry_after)
                 raise UpdateFailed("Rate limited by Fuel Finder API — will retry next interval")
             if resp.status >= 500:
                 raise _TransientApiError(f"Batch {batch} request failed with status {resp.status}")
@@ -211,14 +242,19 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.warning("Station metadata fetch failed, rich attributes unavailable: %s", err)
 
+        # Use incremental fetch when we have a prior successful run date, to reduce API load.
+        # On failure the coordinator falls back to a full fetch automatically (see below).
+        effective_start = self._last_prices_fetched_at
+
         # Deduplicate batches and fetch all in parallel
         batches = list({s["batch"] for s in self._stations})
         results = await asyncio.gather(
-            *[self._fetch_batch(token, b) for b in batches],
+            *[self._fetch_batch(token, b, effective_start=effective_start) for b in batches],
             return_exceptions=True,
         )
 
         batch_data: dict[int, list] = {}
+        incremental_empty = False
         for batch, result in zip(batches, results):
             if isinstance(result, Exception):
                 if isinstance(result, _TransientApiError):
@@ -228,8 +264,29 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                         result,
                     )
                     return self.data or {}
+                if effective_start is not None:
+                    # Incremental fetch failed — fall back to a full fetch for this batch
+                    _LOGGER.warning(
+                        "Incremental fetch failed for batch %s (%s) — retrying with full fetch",
+                        batch,
+                        result,
+                    )
+                    try:
+                        batch_data[batch] = await self._fetch_batch(token, batch)
+                    except Exception as fallback_err:
+                        raise UpdateFailed(f"Failed to fetch batch {batch}: {fallback_err}") from fallback_err
+                    continue
                 raise UpdateFailed(f"Failed to fetch batch {batch}: {result}")
-            batch_data[batch] = result
+            if not result and effective_start is not None:
+                # Empty response on an incremental fetch means no changes since last run
+                incremental_empty = True
+                batch_data[batch] = []
+            else:
+                batch_data[batch] = result
+
+        if incremental_empty and all(not v for v in batch_data.values()):
+            _LOGGER.debug("Incremental price refresh: no changes since %s", effective_start)
+            return self.data or {}
 
         # Extract prices for each configured station
         data: dict[str, Any] = {}
@@ -303,5 +360,9 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 self._config_entry,
                 options={**self._config_entry.options, CONF_STATIONS: updated_stations},
             )
+
+        # Record today's date so the next run can use effective-start-timestamp
+        from datetime import date
+        self._last_prices_fetched_at = date.today().isoformat()
 
         return data
