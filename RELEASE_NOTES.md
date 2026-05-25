@@ -1,3 +1,12 @@
+## v1.0.7
+
+### Bug Fixes
+
+- **Station not found during incremental refresh** — when an incremental fetch returned an empty batch (meaning "no changes since last run"), the cross-batch fallback search incorrectly treated that empty result as confirmation the station was absent. It now re-fetches those batches fully so stations that haven't changed are still found correctly.
+- **Increased batch search ceiling** — the maximum number of batches searched when locating a missing station has been raised from 15 to 80, matching the API's real-world scale (~7,900 stations).
+
+---
+
 ## v1.0.6
 
 ### Bug Fixes

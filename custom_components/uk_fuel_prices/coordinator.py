@@ -138,10 +138,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
     ) -> int | None:
         """Search all batches for a station by node_id. Fetches and caches batches not yet loaded."""
         for batch in range(1, SEARCH_MAX_BATCH + 1):
-            if batch in batch_data:
+            if batch in batch_data and batch_data[batch]:
                 if any(s["node_id"] == node_id for s in batch_data[batch]):
                     return batch
             else:
+                # Empty incremental result means "no changes", not "station absent" — full fetch needed.
                 try:
                     data = await self._fetch_batch(token, batch)
                 except Exception:
