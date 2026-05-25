@@ -1,3 +1,12 @@
+## v1.0.6
+
+### Bug Fixes
+
+- **Suppress spurious incremental-fetch warnings** — batches 7-10 (and others) can return HTTP 404 when no price changes exist since the `effective-start-timestamp`. The fallback to a full fetch always recovers correctly; the warning is now logged at DEBUG level instead of WARNING to keep logs clean.
+- **Permanently closed station no longer warns** — stations marked as permanently closed in the Fuel Finder API no longer produce a WARNING when not found in any price batch. The event is now logged at INFO level with a clearer message.
+
+---
+
 ## v1.0.5
 
 ### Improvements

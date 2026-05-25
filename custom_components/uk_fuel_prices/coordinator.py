@@ -265,8 +265,10 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                     )
                     return self.data or {}
                 if effective_start is not None:
-                    # Incremental fetch failed — fall back to a full fetch for this batch
-                    _LOGGER.warning(
+                    # Incremental fetch failed — fall back to a full fetch for this batch.
+                    # Some batches return 404 when no changes exist since the effective-start;
+                    # log at DEBUG since the fallback always recovers correctly.
+                    _LOGGER.debug(
                         "Incremental fetch failed for batch %s (%s) — retrying with full fetch",
                         batch,
                         result,
@@ -308,12 +310,21 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                         found_batch,
                     )
                 else:
-                    _LOGGER.warning(
-                        "Station '%s' (node_id: %s) not found in any batch — "
-                        "it may have been closed or removed from the API",
-                        station["name"],
-                        station["node_id"],
-                    )
+                    station_meta = self._station_metadata.get(station["node_id"], {})
+                    if station_meta.get("permanent_closure"):
+                        _LOGGER.info(
+                            "Station '%s' (node_id: %s) not found in any batch — "
+                            "marked as permanently closed in the API",
+                            station["name"],
+                            station["node_id"],
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Station '%s' (node_id: %s) not found in any batch — "
+                            "it may have been closed or removed from the API",
+                            station["name"],
+                            station["node_id"],
+                        )
                     continue
 
             prices: dict[str, Any] = {}
