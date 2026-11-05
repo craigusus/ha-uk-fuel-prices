@@ -7,19 +7,43 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_CLIENT_ID, CONF_CLIENT_SECRET, CONF_STATIONS, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN
+from .const import CONF_CLIENT_ID, CONF_CLIENT_SECRET, CONF_FUEL_TYPES, CONF_STATIONS, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .coordinator import FuelFinderCoordinator
 
 PLATFORMS = [Platform.SENSOR]
 
 
+def _merge_duplicate_stations(stations: list[dict]) -> list[dict]:
+    """Collapse entries sharing a node_id, as created by re-adding a configured station.
+
+    The latest entry's details win, as they are the freshest, and all fuel types are kept.
+    """
+    merged: dict[str, dict] = {}
+    for station in stations:
+        existing = merged.get(station["node_id"])
+        if existing is None:
+            merged[station["node_id"]] = station
+            continue
+        fuel_types = dict.fromkeys([*existing.get(CONF_FUEL_TYPES, []), *station.get(CONF_FUEL_TYPES, [])])
+        merged[station["node_id"]] = {**existing, **station, CONF_FUEL_TYPES: list(fuel_types)}
+    return list(merged.values())
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up UK Fuel Prices from a config entry."""
+    stations = entry.options.get(CONF_STATIONS, [])
+    merged_stations = _merge_duplicate_stations(stations)
+    if len(merged_stations) != len(stations):
+        # Done before the update listener is registered, so this doesn't trigger a reload.
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_STATIONS: merged_stations}
+        )
+
     coordinator = FuelFinderCoordinator(
         hass,
         client_id=entry.data[CONF_CLIENT_ID],
         client_secret=entry.data[CONF_CLIENT_SECRET],
-        stations=entry.options.get(CONF_STATIONS, []),
+        stations=merged_stations,
         update_interval=entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
         config_entry=entry,
     )

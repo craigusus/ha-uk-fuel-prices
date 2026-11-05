@@ -4,6 +4,7 @@
 
 - **Open stations no longer reported as "not found" or going unknown** — an incremental refresh only lists stations whose prices changed. If other stations in the same batch changed but yours didn't, the integration treated your station as missing: it logged a "may have been closed or removed" warning, its sensors went unknown, and it searched every other batch for it. Unchanged stations now keep their last known prices, with no extra API calls. You no longer need to remove and re-add a station to recover from this.
 - **Stations that have moved or been removed are still detected** — a full price refresh now runs once a day, so these changes are picked up even though incremental refreshes can't show them. A warning about a missing station now only appears after a full check of the batches.
+- **Re-adding a configured station no longer creates a duplicate** — adding a station that was already configured saved it twice, causing a "does not generate unique IDs" error in the logs. Duplicates are now merged into one entry that keeps all selected fuel types, and any already in your configuration are cleaned up automatically when the integration loads.
 
 ---
 
