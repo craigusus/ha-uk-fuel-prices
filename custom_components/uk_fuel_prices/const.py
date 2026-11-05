@@ -35,4 +35,5 @@ DEFAULT_UPDATE_INTERVAL = 1800  # 30 minutes in seconds
 
 TOKEN_EXPIRY_BUFFER_SECONDS = 60
 STATION_METADATA_CACHE_SECONDS = 86400  # Refresh station metadata once per day
+FULL_REFRESH_INTERVAL_SECONDS = 86400  # Full price fetch once per day; incremental in between
 SEARCH_MAX_BATCH = 80

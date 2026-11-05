@@ -15,6 +15,7 @@ from .const import (
     CONF_STATIONS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    FULL_REFRESH_INTERVAL_SECONDS,
     PRICES_URL,
     SEARCH_MAX_BATCH,
     STATION_METADATA_CACHE_SECONDS,
@@ -62,6 +63,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         self._station_metadata: dict[str, dict] = {}
         self._station_metadata_last_fetched: float = 0
         self._last_prices_fetched_at: str | None = None  # ISO date of last successful price fetch
+        self._last_full_refresh_at: float = 0
 
     async def _get_token(self) -> str:
         """Return a valid access token, fetching a new one if necessary."""
@@ -134,22 +136,29 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
             return await resp.json()
 
     async def _find_station_in_any_batch(
-        self, token: str, node_id: str, batch_data: dict[int, list]
+        self,
+        token: str,
+        node_id: str,
+        batch_data: dict[int, list],
+        incremental_batches: set[int],
+        preferred_batch: int,
     ) -> int | None:
-        """Search all batches for a station by node_id. Fetches and caches batches not yet loaded."""
-        for batch in range(1, SEARCH_MAX_BATCH + 1):
-            if batch in batch_data and batch_data[batch]:
-                if any(s["node_id"] == node_id for s in batch_data[batch]):
-                    return batch
-            else:
-                # Empty incremental result means "no changes", not "station absent" — full fetch needed.
+        """Search all batches for a station by node_id, starting with preferred_batch.
+
+        Incremental results list only stations that changed, so they cannot show a
+        station is absent: those batches are replaced with a full fetch, as are any
+        not yet loaded.
+        """
+        other_batches = (b for b in range(1, SEARCH_MAX_BATCH + 1) if b != preferred_batch)
+        for batch in (preferred_batch, *other_batches):
+            if batch not in batch_data or batch in incremental_batches:
                 try:
-                    data = await self._fetch_batch(token, batch)
+                    batch_data[batch] = await self._fetch_batch(token, batch)
                 except Exception:
                     continue
-                batch_data[batch] = data
-                if any(s["node_id"] == node_id for s in data):
-                    return batch
+                incremental_batches.discard(batch)
+            if any(s["node_id"] == node_id for s in batch_data[batch]):
+                return batch
         return None
 
     async def _fetch_station_metadata(self, token: str) -> None:
@@ -245,7 +254,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
 
         # Use incremental fetch when we have a prior successful run date, to reduce API load.
         # On failure the coordinator falls back to a full fetch automatically (see below).
-        effective_start = self._last_prices_fetched_at
+        # A daily full fetch picks up stations that have moved batch or been removed, which
+        # incremental results cannot reveal.
+        full_refresh_due = time.time() - self._last_full_refresh_at > FULL_REFRESH_INTERVAL_SECONDS
+        effective_start = None if full_refresh_due else self._last_prices_fetched_at
+        previous_data = self.data or {}
 
         # Deduplicate batches and fetch all in parallel
         batches = list({s["batch"] for s in self._stations})
@@ -255,6 +268,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         )
 
         batch_data: dict[int, list] = {}
+        incremental_batches: set[int] = set()
         incremental_empty = False
         for batch, result in zip(batches, results):
             if isinstance(result, Exception):
@@ -280,6 +294,8 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                         raise UpdateFailed(f"Failed to fetch batch {batch}: {fallback_err}") from fallback_err
                     continue
                 raise UpdateFailed(f"Failed to fetch batch {batch}: {result}")
+            if effective_start is not None:
+                incremental_batches.add(batch)
             if not result and effective_start is not None:
                 # Empty response on an incremental fetch means no changes since last run
                 incremental_empty = True
@@ -287,7 +303,11 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
             else:
                 batch_data[batch] = result
 
-        if incremental_empty and all(not v for v in batch_data.values()):
+        if (
+            incremental_empty
+            and all(not v for v in batch_data.values())
+            and all(s["node_id"] in previous_data for s in self._stations)
+        ):
             _LOGGER.debug("Incremental price refresh: no changes since %s", effective_start)
             return self.data or {}
 
@@ -300,16 +320,24 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
                 (s for s in station_list if s["node_id"] == station["node_id"]), None
             )
             if not station_data:
-                found_batch = await self._find_station_in_any_batch(token, station["node_id"], batch_data)
+                # Absent from an incremental result just means its prices haven't changed.
+                if station["batch"] in incremental_batches and station["node_id"] in previous_data:
+                    data[station["node_id"]] = previous_data[station["node_id"]]
+                    continue
+
+                found_batch = await self._find_station_in_any_batch(
+                    token, station["node_id"], batch_data, incremental_batches, station["batch"]
+                )
                 if found_batch is not None:
                     station_data = next(s for s in batch_data[found_batch] if s["node_id"] == station["node_id"])
-                    batch_corrections[station["node_id"]] = found_batch
-                    _LOGGER.info(
-                        "Station '%s' moved from batch %s to batch %s — updating config automatically.",
-                        station["name"],
-                        station["batch"],
-                        found_batch,
-                    )
+                    if found_batch != station["batch"]:
+                        batch_corrections[station["node_id"]] = found_batch
+                        _LOGGER.info(
+                            "Station '%s' moved from batch %s to batch %s — updating config automatically.",
+                            station["name"],
+                            station["batch"],
+                            found_batch,
+                        )
                 else:
                     station_meta = self._station_metadata.get(station["node_id"], {})
                     if station_meta.get("permanent_closure"):
@@ -376,5 +404,7 @@ class FuelFinderCoordinator(DataUpdateCoordinator):
         # Record today's date so the next run can use effective-start-timestamp
         from datetime import date
         self._last_prices_fetched_at = date.today().isoformat()
+        if effective_start is None:
+            self._last_full_refresh_at = time.time()
 
         return data

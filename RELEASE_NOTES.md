@@ -1,3 +1,12 @@
+## v1.0.8
+
+### Bug Fixes
+
+- **Open stations no longer reported as "not found" or going unknown** — an incremental refresh only lists stations whose prices changed. If other stations in the same batch changed but yours didn't, the integration treated your station as missing: it logged a "may have been closed or removed" warning, its sensors went unknown, and it searched every other batch for it. Unchanged stations now keep their last known prices, with no extra API calls. You no longer need to remove and re-add a station to recover from this.
+- **Stations that have moved or been removed are still detected** — a full price refresh now runs once a day, so these changes are picked up even though incremental refreshes can't show them. A warning about a missing station now only appears after a full check of the batches.
+
+---
+
 ## v1.0.7
 
 ### Bug Fixes
